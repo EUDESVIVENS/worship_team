@@ -211,7 +211,7 @@ $users = $stmt->fetchAll();
 <!-- Modals (same as before, unchanged) -->
 <div id="viewDetailsModal" class="modal">
     <div class="modal-content" style="max-width: 650px;">
-        <div class="modal-header">User Details</div>
+        <div class="modal-header">User Detailss</div>
         <div id="detailsContent" style="max-height: 500px; overflow-y: auto;"></div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('viewDetailsModal')">Close</button>

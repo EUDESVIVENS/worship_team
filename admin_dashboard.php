@@ -324,7 +324,7 @@ $page = $_GET['page'] ?? 'dashboard';
     </div>
     <div class="main-content">
         <?php if ($page == 'dashboard'): ?>
-            <div class="welcome-banner"><h1><i class="fas fa-crown"></i> Welcome back,, <?php echo htmlspecialchars($_SESSION['name']); ?>!</h1><p>Here's your worship team management hub.</p></div>
+            <div class="welcome-banner"><h1><i class="fas fa-crown"></i> Welcome back, <?php echo htmlspecialchars($_SESSION['name']); ?>!</h1><p>Here's your worship team management hub.</p></div>
             <div class="stats-grid">
                 <div class="stat-card" onclick="window.location.href='?page=user_management'"><i class="fas fa-user-friends"></i><div class="stat-number"><?php echo $totalMembers; ?></div><div class="stat-label">Team Members</div></div>
                 <div class="stat-card" onclick="window.location.href='?page=music_evangelism'"><i class="fas fa-music"></i><div class="stat-number"><?php echo $totalSongs; ?></div><div class="stat-label">Songs</div></div>
