@@ -35,7 +35,7 @@ $page = $_GET['page'] ?? 'dashboard';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', system-ui, sans-serif; background: #f0f2f5; width: 100%; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: #f0f2f5; width: 100%; font-size: 14px;}
         @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;400;500;600;700;800&display=swap');
 
         /* TOP NAVIGATION */

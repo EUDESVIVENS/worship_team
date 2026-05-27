@@ -113,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // ----- GROUPS -----
+    // ----- GROUPS (manually created groups) -----
     elseif ($sub == 'group') {
         if ($action == 'add_group') {
             $name = trim($_POST['name']);
@@ -128,7 +128,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             $message = "Group created.";
-            // Force tab to groups on redirect
             $tab = 'groups';
         } elseif ($action == 'edit_group') {
             $id = (int)$_POST['id'];
@@ -219,20 +218,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // ----- SERVICE TEAM (added) -----
+    // ----- SERVICE TEAM (generator, delete, batch) -----
     elseif ($sub == 'service_team') {
         if ($action == 'generate_teams') {
             $service_date = $_POST['service_date'];
             $service_name = trim($_POST['service_name']);
             $num_teams = (int)$_POST['num_teams'];
-            $required = [
-                'Soprano' => (int)$_POST['required_soprano'],
-                'Alto'    => (int)$_POST['required_alto'],
-                'Tenor'   => (int)$_POST['required_tenor'],
-                'Bass'    => (int)$_POST['required_bass']
-            ];
+
             // Fetch all active singers with voice part and level
             $singers = $pdo->query("SELECT id, name, voice_part, performance_level FROM users WHERE status = 'active' AND voice_part IS NOT NULL ORDER BY voice_part, performance_level DESC")->fetchAll();
+            if (count($singers) == 0) {
+                $error = "No singers with assigned voice parts. Please assign voice parts in Settings first.";
+                header("Location: ?page=music_evangelism&tab=groups&error=" . urlencode($error));
+                exit;
+            }
+
             // Group by voice part and level
             $pools = [];
             foreach (['Soprano', 'Alto', 'Tenor', 'Bass'] as $vp) {
@@ -244,67 +244,134 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pools[$s['voice_part']][$s['performance_level']][] = $s;
                 }
             }
-            // Shuffle each pool
+
+            // Calculate total available per voice part
+            $available = [];
+            foreach ($pools as $vp => $levels) {
+                $available[$vp] = count($levels['Good']) + count($levels['Normal']);
+            }
+
+            // Determine required singers per voice part per team (even distribution)
+            $required = [];
+            foreach ($available as $vp => $total) {
+                if ($total == 0) {
+                    for ($t = 0; $t < $num_teams; $t++) $required[$vp][$t] = 0;
+                    continue;
+                }
+                $perTeam = floor($total / $num_teams);
+                $remainder = $total % $num_teams;
+                for ($t = 0; $t < $num_teams; $t++) {
+                    $required[$vp][$t] = $perTeam + ($t < $remainder ? 1 : 0);
+                }
+            }
+
+            // Shuffle pools
             foreach ($pools as $vp => $levels) {
                 foreach ($levels as $level => $list) {
                     shuffle($list);
                     $pools[$vp][$level] = $list;
                 }
             }
-            // Pointers for round-robin
+
+            // Pointers for round-robin selection
             $pointers = [];
             foreach ($pools as $vp => $levels) {
                 foreach ($levels as $level => $list) {
                     $pointers[$vp][$level] = 0;
                 }
             }
-            // Generate teams
+
+            // Build teams
             $teams = [];
             for ($t = 0; $t < $num_teams; $t++) {
-                $team = [];
+                $teams[$t] = [];
                 foreach (['Soprano', 'Alto', 'Tenor', 'Bass'] as $vp) {
-                    $team[$vp] = [];
-                    $needed = $required[$vp];
+                    $teams[$t][$vp] = [];
+                    $needed = $required[$vp][$t];
+                    // First Good, then Normal
                     foreach (['Good', 'Normal'] as $level) {
                         $pool = $pools[$vp][$level];
                         $poolSize = count($pool);
                         if ($poolSize == 0) continue;
-                        while ($needed > 0 && count($team[$vp]) < $required[$vp]) {
+                        while ($needed > 0 && count($teams[$t][$vp]) < $required[$vp][$t]) {
                             $idx = $pointers[$vp][$level] % $poolSize;
                             $singer = $pool[$idx];
-                            $team[$vp][] = $singer;
+                            // Avoid assigning same singer to multiple teams in this batch
+                            $alreadyAssigned = false;
+                            for ($prev = 0; $prev < $t; $prev++) {
+                                if (in_array($singer['id'], array_column($teams[$prev][$vp], 'id'))) {
+                                    $alreadyAssigned = true;
+                                    break;
+                                }
+                            }
+                            if (!$alreadyAssigned) {
+                                $teams[$t][$vp][] = $singer;
+                                $needed--;
+                            }
                             $pointers[$vp][$level]++;
-                            $needed--;
+                            if ($pointers[$vp][$level] >= $poolSize * 2) break; // prevent infinite loop
                         }
                     }
                 }
-                $teams[] = $team;
             }
-            // Insert into database
+
+            // Insert into database with batch_id
+            $batch_id = uniqid('batch_');
             for ($t = 0; $t < $num_teams; $t++) {
                 $teamName = $service_name . ($num_teams > 1 ? " (Team " . ($t+1) . ")" : "");
-                $pdo->prepare("INSERT INTO service_teams (service_date, service_name) VALUES (?, ?)")->execute([$service_date, $teamName]);
+                $stmt = $pdo->prepare("INSERT INTO service_teams (service_date, service_name, batch_id) VALUES (?, ?, ?)");
+                $stmt->execute([$service_date, $teamName, $batch_id]);
                 $team_id = $pdo->lastInsertId();
+
                 foreach ($teams[$t] as $vp => $members) {
                     foreach ($members as $singer) {
-                        $pdo->prepare("INSERT INTO service_team_members (service_team_id, user_id, voice_part, performance_level) VALUES (?, ?, ?, ?)")->execute([$team_id, $singer['id'], $singer['voice_part'], $singer['performance_level']]);
+                        $stmt2 = $pdo->prepare("INSERT INTO service_team_members (service_team_id, user_id, voice_part, performance_level) VALUES (?, ?, ?, ?)");
+                        $stmt2->execute([$team_id, $singer['id'], $singer['voice_part'], $singer['performance_level']]);
                     }
                 }
             }
             $message = "$num_teams service team(s) generated successfully.";
             $tab = 'groups';
+
         } elseif ($action == 'delete_service_team') {
             $id = (int)$_POST['id'];
             $pdo->prepare("DELETE FROM service_teams WHERE id=?")->execute([$id]);
             $message = "Service team deleted.";
             $tab = 'groups';
+
+        } elseif ($action == 'delete_batch') {
+            $batch_id = $_POST['batch_id'];
+            $pdo->prepare("DELETE FROM service_teams WHERE batch_id = ?")->execute([$batch_id]);
+            $message = "Batch deleted.";
+            $tab = 'groups';
         }
     }
 
-    // Redirect back with message, preserving tab
+    // ----- GROUP SETTINGS (save default values) -----
+    elseif ($sub == 'group_settings') {
+        if ($action == 'save_settings') {
+            $default_soprano = (int)$_POST['default_soprano'];
+            $default_alto = (int)$_POST['default_alto'];
+            $default_tenor = (int)$_POST['default_tenor'];
+            $default_bass = (int)$_POST['default_bass'];
+            $default_rotation = $_POST['default_rotation'];
+
+            $pdo->prepare("REPLACE INTO group_settings (setting_key, setting_value) VALUES ('default_soprano', ?)")->execute([$default_soprano]);
+            $pdo->prepare("REPLACE INTO group_settings (setting_key, setting_value) VALUES ('default_alto', ?)")->execute([$default_alto]);
+            $pdo->prepare("REPLACE INTO group_settings (setting_key, setting_value) VALUES ('default_tenor', ?)")->execute([$default_tenor]);
+            $pdo->prepare("REPLACE INTO group_settings (setting_key, setting_value) VALUES ('default_bass', ?)")->execute([$default_bass]);
+            $pdo->prepare("REPLACE INTO group_settings (setting_key, setting_value) VALUES ('default_rotation', ?)")->execute([$default_rotation]);
+
+            $message = "Settings saved.";
+            $tab = 'groups';
+        }
+    }
+
+    // Redirect back with message
     header("Location: ?page=music_evangelism&tab=$tab&success=" . urlencode($message ?: $error));
     exit;
 }
+
 // If no action, redirect back
 header("Location: ?page=music_evangelism&tab=playlist");
 exit;
